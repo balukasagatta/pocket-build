@@ -53,22 +53,25 @@ Environment overrides:
 - `EXPORT_METHOD` — `ad-hoc` / `app-store` / `development` / `enterprise`
 - `SKIP_CODESIGNING=1` — archive without signing (not for distribution)
 
-## GitHub Actions
+## GitHub Actions — get an automated artifact
 
-### `iOS CI` (automatic)
+**Full setup guide:** [docs/SETUP-GITHUB-ACTIONS.md](docs/SETUP-GITHUB-ACTIONS.md)
 
-Triggers on push/PR to `main`/`master` and `workflow_dispatch`.
+Short version:
 
-1. Select Xcode 16.2  
-2. Bundle install + cache CocoaPods  
-3. `pod install`  
-4. Unsigned Debug build for iPhone Simulator  
-5. Unit tests with code coverage + JUnit  
-6. Upload `artifacts/` (logs, `.xcresult`, junit)
+1. **Host this repo on GitHub** (Create repo / push `main`). Workflows only run on GitHub, not on Origin-only remotes.
+2. Enable **Settings → Actions → Allow actions**.
+3. Push to `main` (or **Actions → iOS CI → Run workflow**).
+4. Open the green run → download artifact **`PocketContactsPro-simulator`** (`PocketContactsPro-simulator.app.zip`).
 
-### `iOS Release` (manual)
+### Workflows
 
-Run from the Actions tab. Provide an export method. For real distribution, add repository secrets:
+| Workflow | File | When | Artifact |
+| --- | --- | --- | --- |
+| **iOS CI** | `.github/workflows/ios-ci.yml` | push / PR / manual | Simulator `.app` zip + logs |
+| **iOS Release** | `.github/workflows/ios-release.yml` | manual only | IPA (needs signing secrets) |
+
+### Release IPA secrets (optional)
 
 | Secret | Description |
 | --- | --- |
@@ -76,8 +79,6 @@ Run from the Actions tab. Provide an export method. For real distribution, add r
 | `P12_PASSWORD` | Password for the `.p12` |
 | `KEYCHAIN_PASSWORD` | Temporary CI keychain password |
 | `BUILD_PROVISION_PROFILE_BASE64` | Base64-encoded `.mobileprovision` |
-
-Without those secrets, re-run with **skip_codesigning** for a non-distributable archive smoke test.
 
 ## Project notes
 

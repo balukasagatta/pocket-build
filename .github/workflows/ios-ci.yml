@@ -86,7 +86,7 @@ jobs:
       - name: Build (Simulator, unsigned)
         run: |
           set -euo pipefail
-          mkdir -p artifacts build
+          mkdir -p artifacts/logs build
           set -o pipefail
           xcodebuild \
             -workspace "${WORKSPACE}" \
@@ -97,13 +97,28 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=YES \
             build \
-            | tee artifacts/xcodebuild-build.log \
+            | tee artifacts/logs/xcodebuild-build.log \
             | bundle exec xcpretty --color
+
+      - name: Package Simulator .app artifact
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find build/DerivedData/Build/Products -type d -name "Pocket Contacts Pro.app" | head -1)
+          if [ -z "${APP_PATH}" ]; then
+            echo "::error::Built .app not found under build/DerivedData/Build/Products"
+            find build/DerivedData/Build/Products -maxdepth 3 -type d || true
+            exit 1
+          fi
+          echo "Packaging: ${APP_PATH}"
+          ditto -c -k --sequesterRsrc --keepParent "${APP_PATH}" \
+            "artifacts/PocketContactsPro-simulator.app.zip"
+          ls -lh artifacts/PocketContactsPro-simulator.app.zip
+          echo "artifact_name=PocketContactsPro-simulator.app.zip" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
         run: |
           set -euo pipefail
-          mkdir -p artifacts
+          mkdir -p artifacts/logs
           set -o pipefail
           xcodebuild \
             -workspace "${WORKSPACE}" \
@@ -111,22 +126,28 @@ jobs:
             -configuration Debug \
             -destination "${{ steps.sim.outputs.destination }}" \
             -derivedDataPath build/DerivedData \
-            -resultBundlePath artifacts/PocketContactsPro.xcresult \
+            -resultBundlePath artifacts/logs/PocketContactsPro.xcresult \
             -enableCodeCoverage YES \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=YES \
             test \
-            | tee artifacts/xcodebuild-test.log \
-            | bundle exec xcpretty --color --report junit --output artifacts/junit.xml
+            | tee artifacts/logs/xcodebuild-test.log \
+            | bundle exec xcpretty --color --report junit --output artifacts/logs/junit.xml
 
-      - name: Upload build artifacts
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketContactsPro-simulator
+          path: artifacts/PocketContactsPro-simulator.app.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-ci-artifacts
-          path: |
-            artifacts/
-            fastlane/test_output/
+          name: ios-ci-logs
+          path: artifacts/logs/
           if-no-files-found: ignore
           retention-days: 14
 
