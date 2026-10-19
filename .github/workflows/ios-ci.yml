@@ -1,32 +1,111 @@
 name: iOS CI
 
+# Triggers:
+# - push/PR in this pipeline repo (pocket-build)
+# - manual Run workflow (optional ios_repo / ios_ref)
+# - repository_dispatch from the pocket container / iOS repo (type: pocket-ios-build)
 on:
   push:
     branches: [main, master, "cursor/**"]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      ios_repo:
+        description: "iOS source repo (owner/name or https URL)"
+        required: false
+        default: "sahmadmustafa/Pocket-Contacts-Pro"
+      ios_ref:
+        description: "Branch, tag, or SHA of the iOS repo"
+        required: false
+        default: "main"
+  repository_dispatch:
+    types: [pocket-ios-build]
 
 concurrency:
-  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  group: ios-ci-${{ github.workflow }}-${{ github.event.client_payload.sha || github.sha }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
   SCHEME: Pocket Contacts Pro
   WORKSPACE: Pocket Contacts Pro.xcworkspace
+  # Default upstream iOS app; override via workflow_dispatch or repository_dispatch payload.
+  DEFAULT_IOS_REPO: sahmadmustafa/Pocket-Contacts-Pro
+  DEFAULT_IOS_REF: main
 
 jobs:
   build-and-test:
-    name: Build & Test
+    name: Build & Test (from iOS repo)
     runs-on: macos-15
     timeout-minutes: 45
 
     steps:
-      - name: Checkout
+      - name: Resolve iOS source coordinates
+        id: src
+        run: |
+          set -euo pipefail
+          # Priority: repository_dispatch payload → workflow_dispatch inputs → defaults
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            REPO='${{ github.event.client_payload.ios_repo }}'
+            REF='${{ github.event.client_payload.ios_ref }}'
+            SHA='${{ github.event.client_payload.sha }}'
+            [ -n "${REF}" ] || REF="${SHA}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            REPO='${{ inputs.ios_repo }}'
+            REF='${{ inputs.ios_ref }}'
+          else
+            REPO="${DEFAULT_IOS_REPO}"
+            REF="${DEFAULT_IOS_REF}"
+          fi
+          REPO="${REPO:-$DEFAULT_IOS_REPO}"
+          REF="${REF:-$DEFAULT_IOS_REF}"
+          # Normalize https://github.com/owner/name(.git) → owner/name
+          REPO="$(echo "${REPO}" | sed -E 's#https?://(github\.com|origin\.cursor\.com)/##; s#\.git$##; s#^git/##')"
+          echo "ios_repo=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "ios_ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Building artifact from iOS repo: ${REPO}@${REF}"
+
+      - name: Checkout pipeline tooling (pocket-build)
         uses: actions/checkout@v4
+        with:
+          path: pipeline
+
+      - name: Checkout iOS application source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.src.outputs.ios_repo }}
+          ref: ${{ steps.src.outputs.ios_ref }}
+          token: ${{ secrets.IOS_REPO_TOKEN || github.token }}
+          path: ios-src
+          # Public upstream works with github.token; private pocket-container needs IOS_REPO_TOKEN.
+
+      - name: Overlay CI scheme + Ruby tooling onto iOS tree
+        run: |
+          set -euo pipefail
+          # Shared scheme is required for headless xcodebuild (upstream often lacks it).
+          mkdir -p "ios-src/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes"
+          if [ -f "pipeline/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes/Pocket Contacts Pro.xcscheme" ]; then
+            cp "pipeline/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes/Pocket Contacts Pro.xcscheme" \
+               "ios-src/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes/"
+          fi
+          # Prefer pipeline Gemfile / lock tooling when present.
+          cp pipeline/Gemfile ios-src/Gemfile
+          [ -f pipeline/Gemfile.lock ] && cp pipeline/Gemfile.lock ios-src/Gemfile.lock || true
+          # Record provenance for the artifact
+          mkdir -p ios-src/artifacts
+          {
+            echo "ios_repo=${{ steps.src.outputs.ios_repo }}"
+            echo "ios_ref=${{ steps.src.outputs.ios_ref }}"
+            echo "triggered_by=${{ github.event_name }}"
+            echo "pipeline_sha=${{ github.sha }}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > ios-src/artifacts/BUILD_INFO.txt
+          (cd ios-src && git rev-parse HEAD) >> ios-src/artifacts/BUILD_INFO.txt || true
+          cat ios-src/artifacts/BUILD_INFO.txt
 
       - name: Select Xcode
+        working-directory: ios-src
         run: |
           if [ -d "${DEVELOPER_DIR}" ]; then
             sudo xcode-select -s "${DEVELOPER_DIR}"
@@ -42,23 +121,35 @@ jobs:
         with:
           ruby-version: "3.3"
           bundler-cache: true
+          working-directory: ios-src
 
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
           path: |
-            Pods
+            ios-src/Pods
             ~/Library/Caches/CocoaPods
-          key: pods-${{ runner.os }}-${{ hashFiles('Podfile.lock', 'Podfile') }}
+          key: pods-${{ runner.os }}-${{ hashFiles('ios-src/Podfile.lock', 'ios-src/Podfile') }}
           restore-keys: |
             pods-${{ runner.os }}-
 
       - name: Install CocoaPods dependencies
-        run: bundle exec pod install --verbose
+        working-directory: ios-src
+        run: |
+          if [ -f Podfile ]; then
+            bundle exec pod install --verbose
+          else
+            echo "No Podfile — building Xcode project directly"
+          fi
 
       - name: List schemes
+        working-directory: ios-src
         run: |
-          xcodebuild -list -workspace "${WORKSPACE}"
+          if [ -f "${WORKSPACE}" ]; then
+            xcodebuild -list -workspace "${WORKSPACE}"
+          else
+            xcodebuild -list -project "Pocket Contacts Pro.xcodeproj"
+          fi
 
       - name: Resolve Simulator destination
         id: sim
@@ -84,12 +175,18 @@ jobs:
           echo "Using destination: ${DEST}"
 
       - name: Build (Simulator, unsigned)
+        working-directory: ios-src
         run: |
           set -euo pipefail
           mkdir -p artifacts/logs build
           set -o pipefail
+          if [ -f "${WORKSPACE}" ]; then
+            PROJECT_ARGS=(-workspace "${WORKSPACE}")
+          else
+            PROJECT_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
+          fi
           xcodebuild \
-            -workspace "${WORKSPACE}" \
+            "${PROJECT_ARGS[@]}" \
             -scheme "${SCHEME}" \
             -configuration Debug \
             -destination "${{ steps.sim.outputs.destination }}" \
@@ -101,6 +198,7 @@ jobs:
             | bundle exec xcpretty --color
 
       - name: Package Simulator .app artifact
+        working-directory: ios-src
         run: |
           set -euo pipefail
           APP_PATH=$(find build/DerivedData/Build/Products -type d -name "Pocket Contacts Pro.app" | head -1)
@@ -113,14 +211,21 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "${APP_PATH}" \
             "artifacts/PocketContactsPro-simulator.app.zip"
           ls -lh artifacts/PocketContactsPro-simulator.app.zip
+          cp artifacts/BUILD_INFO.txt artifacts/BUILD_INFO.txt.bak 2>/dev/null || true
 
       - name: Unit tests
+        working-directory: ios-src
         run: |
           set -euo pipefail
           mkdir -p artifacts/logs
           set -o pipefail
+          if [ -f "${WORKSPACE}" ]; then
+            PROJECT_ARGS=(-workspace "${WORKSPACE}")
+          else
+            PROJECT_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
+          fi
           xcodebuild \
-            -workspace "${WORKSPACE}" \
+            "${PROJECT_ARGS[@]}" \
             -scheme "${SCHEME}" \
             -configuration Debug \
             -destination "${{ steps.sim.outputs.destination }}" \
@@ -137,7 +242,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PocketContactsPro-simulator
-          path: artifacts/PocketContactsPro-simulator.app.zip
+          path: |
+            ios-src/artifacts/PocketContactsPro-simulator.app.zip
+            ios-src/artifacts/BUILD_INFO.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -146,46 +253,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-ci-logs
-          path: artifacts/logs/
+          path: ios-src/artifacts/logs/
           if-no-files-found: ignore
           retention-days: 14
-
-  fastlane-ci:
-    name: Fastlane CI
-    runs-on: macos-15
-    timeout-minutes: 45
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[fastlane]')
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: |
-          if [ -d "${DEVELOPER_DIR}" ]; then
-            sudo xcode-select -s "${DEVELOPER_DIR}"
-          fi
-          xcodebuild -version
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-
-      - name: Run Fastlane CI lane
-        env:
-          DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=latest
-          TEST_DEVICE: iPhone 16
-        run: bundle exec fastlane ci
-
-      - name: Upload Fastlane reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fastlane-reports
-          path: |
-            fastlane/test_output/
-            fastlane/logs/
-            artifacts/
-          if-no-files-found: ignore

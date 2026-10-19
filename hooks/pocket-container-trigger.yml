@@ -1,0 +1,76 @@
+# Copy this file into the *pocket container / iOS* repository as:
+#   .github/workflows/trigger-pocket-build.yml
+#
+# On push/PR (or manual run), it notifies mcdonald-s-cursor-tenant/pocket-build
+# via repository_dispatch. pocket-build then clones THIS repo at the commit SHA
+# and produces the Simulator .app artifact from that source.
+#
+# Required secret in the pocket container repo:
+#   POCKET_BUILD_TOKEN — PAT / Origin token with workflow + contents rights on pocket-build
+#
+# Optional vars:
+#   POCKET_BUILD_REPO — default mcdonald-s-cursor-tenant/pocket-build
+#   POCKET_BUILD_API  — GitHub API host; for Origin set to your Origin API dispatch endpoint
+
+name: Trigger pocket-build
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  dispatch:
+    name: Notify pocket-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch → pocket-build
+        env:
+          POCKET_BUILD_TOKEN: ${{ secrets.POCKET_BUILD_TOKEN }}
+          POCKET_BUILD_REPO: ${{ vars.POCKET_BUILD_REPO || 'mcdonald-s-cursor-tenant/pocket-build' }}
+          # GitHub.com default. For Cursor Origin, override POCKET_BUILD_API
+          # to the forge API that accepts repository_dispatch-compatible calls.
+          POCKET_BUILD_API: ${{ vars.POCKET_BUILD_API || 'https://api.github.com' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${POCKET_BUILD_TOKEN:-}" ]; then
+            echo "::error::Missing secret POCKET_BUILD_TOKEN in the pocket container repo."
+            exit 1
+          fi
+
+          # When this workflow runs inside the iOS / pocket container repo,
+          # GITHUB_REPOSITORY is the source that pocket-build should clone.
+          IOS_REPO="${GITHUB_REPOSITORY}"
+          IOS_REF="${GITHUB_SHA}"
+
+          echo "Dispatching pocket-ios-build"
+          echo "  target: ${POCKET_BUILD_REPO}"
+          echo "  ios_repo: ${IOS_REPO}"
+          echo "  ios_ref/sha: ${IOS_REF}"
+
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${POCKET_BUILD_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${POCKET_BUILD_API}/repos/${POCKET_BUILD_REPO}/dispatches" \
+            -d "$(jq -n \
+              --arg event_type "pocket-ios-build" \
+              --arg ios_repo "${IOS_REPO}" \
+              --arg ios_ref "${IOS_REF}" \
+              --arg sha "${GITHUB_SHA}" \
+              --arg source_repo "${GITHUB_REPOSITORY}" \
+              --arg source_run "${GITHUB_RUN_ID}" \
+              '{
+                event_type: $event_type,
+                client_payload: {
+                  ios_repo: $ios_repo,
+                  ios_ref: $ios_ref,
+                  sha: $sha,
+                  source_repo: $source_repo,
+                  source_run_id: $source_run
+                }
+              }')"
+
+          echo "Dispatch accepted. Open pocket-build → Actions → iOS CI for the artifact."

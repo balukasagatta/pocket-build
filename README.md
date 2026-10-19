@@ -53,6 +53,17 @@ Environment overrides:
 - `EXPORT_METHOD` — `ad-hoc` / `app-store` / `development` / `enterprise`
 - `SKIP_CODESIGNING=1` — archive without signing (not for distribution)
 
+## Cross-repo hook (pocket container → this pipeline)
+
+The **artifact is built from the iOS / pocket container repo**, not only from files vendored here.
+
+1. Pocket container pushes code  
+2. Its workflow sends `repository_dispatch` (`pocket-ios-build`) to this repo  
+3. **iOS CI** clones that commit, builds, uploads `PocketContactsPro-simulator`
+
+Hook template: [`hooks/pocket-container-trigger.yml`](hooks/pocket-container-trigger.yml)  
+Setup: [docs/CROSS-REPO-HOOK.md](docs/CROSS-REPO-HOOK.md)
+
 ## GitHub Actions — get an automated artifact
 
 **Full setup guide:** [docs/SETUP-GITHUB-ACTIONS.md](docs/SETUP-GITHUB-ACTIONS.md)
