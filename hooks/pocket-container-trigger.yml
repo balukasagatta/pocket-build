@@ -1,19 +1,11 @@
 # Installed on: https://github.com/balukasagatta/Pocket-Contacts-Pro_devops
-# Path on that repo: .github/workflows/trigger-pocket-build.yml
+# Path: .github/workflows/trigger-pocket-build.yml
 #
-# On push/PR (or manual run), notifies mcdonald-s-cursor-tenant/pocket-build
-# via repository_dispatch. pocket-build clones THIS fork at the commit SHA
-# and produces the Simulator .app artifact from that source.
+# Notifies balukasagatta/pocket-build via repository_dispatch so CI builds
+# THIS fork at the triggering SHA and uploads the Simulator .app artifact.
 #
-# Required secret on Pocket-Contacts-Pro_devops:
-#   POCKET_BUILD_TOKEN — GitHub PAT (repo + workflow) with access to the *GitHub*
-#                         pocket-build pipeline repo (not the Origin-only URL).
-#
-# Required / optional vars on the fork:
-#   POCKET_BUILD_REPO — GitHub owner/name of the pipeline repo
-#                       (MUST exist on github.com — Origin-only names return 404)
-#                       Example: balukasagatta/pocket-build
-#   POCKET_BUILD_API  — default https://api.github.com
+# Secret: POCKET_BUILD_TOKEN — GitHub PAT with repo + workflow on pocket-build
+# Variable: POCKET_BUILD_REPO — balukasagatta/pocket-build
 
 name: Trigger pocket-build
 
@@ -29,21 +21,16 @@ jobs:
     name: Notify pocket-build
     runs-on: ubuntu-latest
     steps:
-      - name: Send repository_dispatch → pocket-build
+      - name: Send repository_dispatch to pocket-build
         env:
           POCKET_BUILD_TOKEN: ${{ secrets.POCKET_BUILD_TOKEN }}
-          # Must be a repo that exists on github.com (e.g. balukasagatta/pocket-build).
-          # mcdonald-s-cursor-tenant/pocket-build is Origin-only → api.github.com returns 404.
           POCKET_BUILD_REPO: ${{ vars.POCKET_BUILD_REPO || 'balukasagatta/pocket-build' }}
           POCKET_BUILD_API: ${{ vars.POCKET_BUILD_API || 'https://api.github.com' }}
         run: |
           set -euo pipefail
+
           if [ -z "${POCKET_BUILD_TOKEN:-}" ]; then
-            echo "::error::Missing secret POCKET_BUILD_TOKEN on Pocket-Contacts-Pro_devops."
-            exit 1
-          fi
-          if [ -z "${POCKET_BUILD_REPO:-}" ]; then
-            echo "::error::Set Actions variable POCKET_BUILD_REPO to your GitHub pipeline repo (owner/name)."
+            echo "::error::Missing secret POCKET_BUILD_TOKEN"
             exit 1
           fi
 
@@ -55,44 +42,49 @@ jobs:
           echo "  target: ${POCKET_BUILD_REPO}"
           echo "  url: ${DISPATCH_URL}"
           echo "  ios_repo: ${IOS_REPO}"
-          echo "  ios_ref/sha: ${IOS_REF}"
+          echo "  ios_ref: ${IOS_REF}"
+
+          PAYLOAD=$(jq -n \
+            --arg event_type "pocket-ios-build" \
+            --arg ios_repo "${IOS_REPO}" \
+            --arg ios_ref "${IOS_REF}" \
+            --arg sha "${GITHUB_SHA}" \
+            --arg source_repo "${GITHUB_REPOSITORY}" \
+            --arg source_run "${GITHUB_RUN_ID}" \
+            '{
+              event_type: $event_type,
+              client_payload: {
+                ios_repo: $ios_repo,
+                ios_ref: $ios_ref,
+                sha: $sha,
+                source_repo: $source_repo,
+                source_run_id: $source_run
+              }
+            }')
 
           HTTP_CODE=$(curl -sS -o /tmp/dispatch-body.txt -w "%{http_code}" -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${POCKET_BUILD_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/json" \
             "${DISPATCH_URL}" \
-            -d "$(jq -n \
-              --arg event_type "pocket-ios-build" \
-              --arg ios_repo "${IOS_REPO}" \
-              --arg ios_ref "${IOS_REF}" \
-              --arg sha "${GITHUB_SHA}" \
-              --arg source_repo "${GITHUB_REPOSITORY}" \
-              --arg source_run "${GITHUB_RUN_ID}" \
-              '{
-                event_type: $event_type,
-                client_payload: {
-                  ios_repo: $ios_repo,
-                  ios_ref: $ios_ref,
-                  sha: $sha,
-                  source_repo: $source_repo,
-                  source_run_id: $source_run
-                }
-              })')
+            -d "${PAYLOAD}")
 
           echo "HTTP ${HTTP_CODE}"
           cat /tmp/dispatch-body.txt || true
           echo
 
-          if [ "${HTTP_CODE}" = "204" ] || [ "${HTTP_CODE}" = "200" ]; then
-            echo "Dispatch accepted. Open https://github.com/${POCKET_BUILD_REPO}/actions → iOS CI for the artifact."
-            exit 0
-          fi
-
-          if [ "${HTTP_CODE}" = "404" ]; then
-            echo "::error::404 from ${DISPATCH_URL} — that repo does not exist on this API host (or the PAT cannot see it). Create balukasagatta/pocket-build on GitHub, push the pipeline, set var POCKET_BUILD_REPO, then re-run."
-            exit 1
-          fi
-
-          echo "::error::Dispatch failed with HTTP ${HTTP_CODE}"
-          exit 1
+          case "${HTTP_CODE}" in
+            200|204)
+              echo "Dispatch accepted."
+              echo "Open https://github.com/${POCKET_BUILD_REPO}/actions for iOS CI / artifact."
+              ;;
+            404)
+              echo "::error::HTTP 404 from dispatch URL. Check POCKET_BUILD_REPO exists on GitHub and the PAT can access it."
+              exit 1
+              ;;
+            *)
+              echo "::error::Dispatch failed with HTTP ${HTTP_CODE}"
+              exit 1
+              ;;
+          esac
