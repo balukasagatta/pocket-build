@@ -40,7 +40,7 @@ Automate an iOS build so that:
      (zip of .app — Simulator only, not IPA)
 ```
 
-**Also exists:** `mcdonald-s-cursor-tenant/pocket-build` on Cursor Origin (same pipeline history). GitHub Actions `repository_dispatch` must target the **GitHub** copy (`balukasagatta/pocket-build`), because `api.github.com` cannot see Origin-only repos (that caused the **404**).
+`repository_dispatch` must target **`balukasagatta/pocket-build`** on github.com (the repo the hook’s `POCKET_BUILD_REPO` points at).
 
 ---
 
@@ -51,7 +51,6 @@ Automate an iOS build so that:
 | [sahmadmustafa/Pocket-Contacts-Pro](https://github.com/sahmadmustafa/Pocket-Contacts-Pro) | Upstream iOS demo (no write access for us) |
 | [balukasagatta/Pocket-Contacts-Pro_devops](https://github.com/balukasagatta/Pocket-Contacts-Pro_devops) | **Our fork** — source of truth for app builds + hook |
 | [balukasagatta/pocket-build](https://github.com/balukasagatta/pocket-build) | **Pipeline on GitHub** — iOS CI / artifacts |
-| Origin `mcdonald-s-cursor-tenant/pocket-build` | Cursor/Origin copy of the pipeline (dev history) |
 
 ---
 
