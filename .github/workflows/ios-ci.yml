@@ -1,0 +1,171 @@
+name: iOS CI
+
+on:
+  push:
+    branches: [main, master, "cursor/**"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
+  SCHEME: Pocket Contacts Pro
+  WORKSPACE: Pocket Contacts Pro.xcworkspace
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -d "${DEVELOPER_DIR}" ]; then
+            sudo xcode-select -s "${DEVELOPER_DIR}"
+          else
+            echo "Configured Xcode not found; using default:"
+            xcode-select -p
+          fi
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            Pods
+            ~/Library/Caches/CocoaPods
+          key: pods-${{ runner.os }}-${{ hashFiles('Podfile.lock', 'Podfile') }}
+          restore-keys: |
+            pods-${{ runner.os }}-
+
+      - name: Install CocoaPods dependencies
+        run: bundle exec pod install --verbose
+
+      - name: List schemes
+        run: |
+          xcodebuild -list -workspace "${WORKSPACE}"
+
+      - name: Resolve Simulator destination
+        id: sim
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available
+          if xcrun simctl list devices available | grep -q "iPhone 16"; then
+            DEST='platform=iOS Simulator,name=iPhone 16,OS=latest'
+            DEVICE='iPhone 16'
+          else
+            DEVICE=$(xcrun simctl list devices available \
+              | sed -n 's/^[[:space:]]*\(iPhone[^()]*\).*/\1/p' \
+              | sed 's/[[:space:]]*$//' \
+              | head -1)
+            if [ -z "${DEVICE}" ]; then
+              echo "::error::No iPhone simulator available"
+              exit 1
+            fi
+            DEST="platform=iOS Simulator,name=${DEVICE},OS=latest"
+          fi
+          echo "destination=${DEST}" >> "$GITHUB_OUTPUT"
+          echo "device=${DEVICE}" >> "$GITHUB_OUTPUT"
+          echo "Using destination: ${DEST}"
+
+      - name: Build (Simulator, unsigned)
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts build
+          set -o pipefail
+          xcodebuild \
+            -workspace "${WORKSPACE}" \
+            -scheme "${SCHEME}" \
+            -configuration Debug \
+            -destination "${{ steps.sim.outputs.destination }}" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            build \
+            | tee artifacts/xcodebuild-build.log \
+            | bundle exec xcpretty --color
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          set -o pipefail
+          xcodebuild \
+            -workspace "${WORKSPACE}" \
+            -scheme "${SCHEME}" \
+            -configuration Debug \
+            -destination "${{ steps.sim.outputs.destination }}" \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath artifacts/PocketContactsPro.xcresult \
+            -enableCodeCoverage YES \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            test \
+            | tee artifacts/xcodebuild-test.log \
+            | bundle exec xcpretty --color --report junit --output artifacts/junit.xml
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ci-artifacts
+          path: |
+            artifacts/
+            fastlane/test_output/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  fastlane-ci:
+    name: Fastlane CI
+    runs-on: macos-15
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message || '', '[fastlane]')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -d "${DEVELOPER_DIR}" ]; then
+            sudo xcode-select -s "${DEVELOPER_DIR}"
+          fi
+          xcodebuild -version
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Run Fastlane CI lane
+        env:
+          DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=latest
+          TEST_DEVICE: iPhone 16
+        run: bundle exec fastlane ci
+
+      - name: Upload Fastlane reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastlane-reports
+          path: |
+            fastlane/test_output/
+            fastlane/logs/
+            artifacts/
+          if-no-files-found: ignore

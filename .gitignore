@@ -1,0 +1,50 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+*.xcuserdata
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+timeline.xctimeline
+playground.xcworkspace
+
+# CocoaPods
+Pods/
+!Podfile.lock
+
+# Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output/
+fastlane/logs/
+*.mobileprovision
+*.cer
+*.p12
+AuthKey_*.p8
+
+# Ruby / Bundler
+vendor/bundle/
+.bundle/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+
+# IDE
+.idea/
+*.swp
+*~
+
+# CI artifacts
+artifacts/
+coverage/
+*.xcresult
+test-results/

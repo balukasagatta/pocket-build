@@ -1,0 +1,4 @@
+app_identifier("Zuooi.Pocket-Contacts-Pro")
+# Set APPLE_ID / TEAM_ID via environment or CI secrets when distributing.
+# apple_id(ENV["APPLE_ID"])
+# team_id(ENV["TEAM_ID"])

@@ -1,0 +1,95 @@
+default_platform(:ios)
+
+PROJECT_ROOT = File.expand_path("..", __dir__)
+WORKSPACE = "Pocket Contacts Pro.xcworkspace"
+SCHEME = "Pocket Contacts Pro"
+
+def simulator_destination
+  ENV.fetch("DESTINATION", "platform=iOS Simulator,name=iPhone 16")
+end
+
+def simulator_device
+  ENV.fetch("TEST_DEVICE", "iPhone 16")
+end
+
+platform :ios do
+  before_all do
+    ENV["FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT"] ||= "120"
+    ENV["FASTLANE_XCODEBUILD_SETTINGS_RETRIES"] ||= "3"
+  end
+
+  desc "Install CocoaPods dependencies"
+  lane :pods do
+    cocoapods(
+      clean_install: true,
+      try_repo_update_on_error: true,
+      podfile: File.join(PROJECT_ROOT, "Podfile")
+    )
+  end
+
+  desc "Build Debug for iOS Simulator (no code signing)"
+  lane :build do
+    pods unless ENV["SKIP_PODS"] == "1"
+
+    Dir.chdir(PROJECT_ROOT) do
+      sh("mkdir -p build artifacts fastlane/logs")
+      sh(
+        "xcodebuild " \
+        "-workspace '#{WORKSPACE}' " \
+        "-scheme '#{SCHEME}' " \
+        "-configuration Debug " \
+        "-destination '#{simulator_destination}' " \
+        "-derivedDataPath build/DerivedData " \
+        "CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES " \
+        "build"
+      )
+    end
+  end
+
+  desc "Run unit tests on Simulator"
+  lane :test do
+    pods unless ENV["SKIP_PODS"] == "1"
+
+    run_tests(
+      workspace: File.join(PROJECT_ROOT, WORKSPACE),
+      scheme: SCHEME,
+      device: simulator_device,
+      clean: true,
+      code_coverage: true,
+      result_bundle: true,
+      output_directory: File.join(PROJECT_ROOT, "fastlane/test_output"),
+      output_types: "junit,html",
+      derived_data_path: File.join(PROJECT_ROOT, "build/DerivedData"),
+      xcargs: "CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES",
+      fail_build: true
+    )
+  end
+
+  desc "CI entrypoint: install pods, build, and run unit tests"
+  lane :ci do
+    pods
+    ENV["SKIP_PODS"] = "1"
+    build
+    test
+  end
+
+  desc "Archive a Release IPA (requires Apple signing setup)"
+  lane :release do
+    pods
+
+    unless ENV["BUILD_CERTIFICATE_BASE64"] || ENV["MATCH_GIT_URL"] || ENV["SKIP_CODESIGNING"] == "1"
+      UI.important("No signing secrets detected. Set SKIP_CODESIGNING=1 for a smoke archive, or configure certificates.")
+    end
+
+    build_app(
+      workspace: File.join(PROJECT_ROOT, WORKSPACE),
+      scheme: SCHEME,
+      configuration: "Release",
+      export_method: ENV.fetch("EXPORT_METHOD", "ad-hoc"),
+      output_directory: File.join(PROJECT_ROOT, "artifacts"),
+      output_name: "PocketContactsPro",
+      clean: true,
+      skip_codesigning: ENV["SKIP_CODESIGNING"] == "1"
+    )
+  end
+end
