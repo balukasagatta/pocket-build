@@ -37,13 +37,20 @@ Build steps clone `ios_repo` @ `ios_ref`, overlay the shared Xcode scheme from p
 
 - **PocketContactsPro-simulator** → `.app.zip` + `BUILD_INFO.txt` (records which iOS SHA was built)
 
-## 2. Wire the pocket container repo
+## 2. Wire the pocket container repo (your fork)
 
-1. Copy [`hooks/pocket-container-trigger.yml`](../hooks/pocket-container-trigger.yml) into the iOS / pocket container repo as:
+**Fork in use:** [balukasagatta/Pocket-Contacts-Pro_devops](https://github.com/balukasagatta/Pocket-Contacts-Pro_devops)
 
-   `.github/workflows/trigger-pocket-build.yml`
+1. Add the hook (from a machine logged into GitHub):
 
-2. In the **pocket container** repo → Settings → Secrets → Actions, add:
+```bash
+# from the pocket-build checkout
+./scripts/install-hook-on-fork.sh
+# or manually: copy hooks/pocket-container-trigger.yml →
+#   .github/workflows/trigger-pocket-build.yml on the fork
+```
+
+2. On the fork → Settings → Secrets → Actions, add:
 
    | Secret | Purpose |
    | --- | --- |

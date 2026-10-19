@@ -14,7 +14,7 @@ on:
       ios_repo:
         description: "iOS source repo (owner/name or https URL)"
         required: false
-        default: "sahmadmustafa/Pocket-Contacts-Pro"
+        default: "balukasagatta/Pocket-Contacts-Pro_devops"
       ios_ref:
         description: "Branch, tag, or SHA of the iOS repo"
         required: false
@@ -30,8 +30,8 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
   SCHEME: Pocket Contacts Pro
   WORKSPACE: Pocket Contacts Pro.xcworkspace
-  # Default upstream iOS app; override via workflow_dispatch or repository_dispatch payload.
-  DEFAULT_IOS_REPO: sahmadmustafa/Pocket-Contacts-Pro
+  # Default iOS app source (your fork); override via workflow_dispatch or repository_dispatch.
+  DEFAULT_IOS_REPO: balukasagatta/Pocket-Contacts-Pro_devops
   DEFAULT_IOS_REF: main
 
 jobs:

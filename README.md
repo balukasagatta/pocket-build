@@ -61,7 +61,8 @@ The **artifact is built from the iOS / pocket container repo**, not only from fi
 2. Its workflow sends `repository_dispatch` (`pocket-ios-build`) to this repo  
 3. **iOS CI** clones that commit, builds, uploads `PocketContactsPro-simulator`
 
-Hook template: [`hooks/pocket-container-trigger.yml`](hooks/pocket-container-trigger.yml)  
+**iOS source fork:** [balukasagatta/Pocket-Contacts-Pro_devops](https://github.com/balukasagatta/Pocket-Contacts-Pro_devops)  
+Hook template: [`hooks/pocket-container-trigger.yml`](hooks/pocket-container-trigger.yml) → install with `./scripts/install-hook-on-fork.sh`  
 Setup: [docs/CROSS-REPO-HOOK.md](docs/CROSS-REPO-HOOK.md)
 
 ## GitHub Actions — get an automated artifact
