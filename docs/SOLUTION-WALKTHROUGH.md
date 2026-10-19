@@ -116,10 +116,9 @@ Lesson: for personal forks and PATs used by Actions, prefer the **personal** acc
 
 ### 3. `repository_dispatch` returned 404
 
-The hook initially targeted `mcdonald-s-cursor-tenant/pocket-build` via `https://api.github.com/.../dispatches`.  
-That name exists on **Cursor Origin**, not on github.com → **404**.
+The hook initially called `api.github.com` with a repo name that did **not** exist on GitHub → **404**.
 
-**Resolution:** host the same pipeline on **GitHub** as `balukasagatta/pocket-build` and set `POCKET_BUILD_REPO` accordingly.
+**Resolution:** create/push the pipeline to **`balukasagatta/pocket-build`** on GitHub and set `POCKET_BUILD_REPO` to that value.
 
 ### 4. Missing / unclear `POCKET_BUILD_TOKEN`
 
@@ -157,7 +156,7 @@ If a PAT was pasted into chat or logs, **revoke it** at https://github.com/setti
 | Doc | Topic |
 | --- | --- |
 | [CROSS-REPO-HOOK.md](./CROSS-REPO-HOOK.md) | How the hook payload works |
-| [FIX-404-DISPATCH.md](./FIX-404-DISPATCH.md) | Why Origin-only names 404 on api.github.com |
+| [FIX-404-DISPATCH.md](./FIX-404-DISPATCH.md) | Why a wrong `POCKET_BUILD_REPO` on api.github.com returns 404 |
 | [SETUP-GITHUB-ACTIONS.md](./SETUP-GITHUB-ACTIONS.md) | Enabling Actions / artifacts |
 | `hooks/pocket-container-trigger.yml` | Hook file to install on the fork |
 
