@@ -27,7 +27,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
   SCHEME: Pocket Contacts Pro
   WORKSPACE: Pocket Contacts Pro.xcworkspace
   # Default iOS app source (your fork); override via workflow_dispatch or repository_dispatch.
@@ -107,14 +106,23 @@ jobs:
       - name: Select Xcode
         working-directory: ios-src
         run: |
-          if [ -d "${DEVELOPER_DIR}" ]; then
-            sudo xcode-select -s "${DEVELOPER_DIR}"
-          else
-            echo "Configured Xcode not found; using default:"
-            xcode-select -p
-          fi
+          # Prefer newest installed Xcode that has Simulator runtimes.
+          for CAND in \
+            /Applications/Xcode_16.4.app/Contents/Developer \
+            /Applications/Xcode_16.3.app/Contents/Developer \
+            /Applications/Xcode_16.2.app/Contents/Developer \
+            /Applications/Xcode_16.1.app/Contents/Developer \
+            /Applications/Xcode_16.app/Contents/Developer \
+            /Applications/Xcode.app/Contents/Developer; do
+            if [ -d "${CAND}" ]; then
+              sudo xcode-select -s "${CAND}"
+              break
+            fi
+          done
+          echo "Using: $(xcode-select -p)"
           xcodebuild -version
           xcodebuild -showsdks
+          xcrun simctl list runtimes || true
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -153,26 +161,32 @@ jobs:
 
       - name: Resolve Simulator destination
         id: sim
+        working-directory: ios-src
         run: |
           set -euo pipefail
-          xcrun simctl list devices available
-          if xcrun simctl list devices available | grep -q "iPhone 16"; then
-            DEST='platform=iOS Simulator,name=iPhone 16,OS=latest'
-            DEVICE='iPhone 16'
+          xcrun simctl list devices available || true
+          if [ -f "${WORKSPACE}" ]; then
+            SHOW_ARGS=(-workspace "${WORKSPACE}")
           else
-            DEVICE=$(xcrun simctl list devices available \
-              | sed -n 's/^[[:space:]]*\(iPhone[^()]*\).*/\1/p' \
-              | sed 's/[[:space:]]*$//' \
-              | head -1)
-            if [ -z "${DEVICE}" ]; then
-              echo "::error::No iPhone simulator available"
-              exit 1
-            fi
-            DEST="platform=iOS Simulator,name=${DEVICE},OS=latest"
+            SHOW_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
           fi
+          # Prefer an id-based destination from xcodebuild (avoids name/OS:latest mismatches).
+          DEST_LINE=$(xcodebuild "${SHOW_ARGS[@]}" -scheme "${SCHEME}" -showdestinations 2>/dev/null \
+            | grep 'platform:iOS Simulator' \
+            | grep 'id:' \
+            | grep -v 'placeholder' \
+            | head -1 || true)
+          if [ -z "${DEST_LINE}" ]; then
+            echo "::error::No usable iOS Simulator destination from xcodebuild -showdestinations"
+            xcodebuild "${SHOW_ARGS[@]}" -scheme "${SCHEME}" -showdestinations || true
+            exit 1
+          fi
+          SIM_ID=$(echo "${DEST_LINE}" | sed -n 's/.*id:\([^,}]*\).*/\1/p' | tr -d ' ')
+          SIM_NAME=$(echo "${DEST_LINE}" | sed -n 's/.*name:\([^,}]*\).*/\1/p' | sed 's/^ *//;s/ *$//')
+          DEST="platform=iOS Simulator,id=${SIM_ID}"
           echo "destination=${DEST}" >> "$GITHUB_OUTPUT"
-          echo "device=${DEVICE}" >> "$GITHUB_OUTPUT"
-          echo "Using destination: ${DEST}"
+          echo "device=${SIM_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Using destination: ${DEST} (${SIM_NAME})"
 
       - name: Build (Simulator, unsigned)
         working-directory: ios-src
