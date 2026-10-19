@@ -113,7 +113,6 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent "${APP_PATH}" \
             "artifacts/PocketContactsPro-simulator.app.zip"
           ls -lh artifacts/PocketContactsPro-simulator.app.zip
-          echo "artifact_name=PocketContactsPro-simulator.app.zip" >> "$GITHUB_OUTPUT"
 
       - name: Unit tests
         run: |
