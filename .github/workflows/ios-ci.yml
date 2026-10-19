@@ -88,9 +88,12 @@ jobs:
             cp "pipeline/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes/Pocket Contacts Pro.xcscheme" \
                "ios-src/Pocket Contacts Pro.xcodeproj/xcshareddata/xcschemes/"
           fi
-          # Prefer pipeline Gemfile / lock tooling when present.
+          # Prefer pipeline Gemfile / Podfile so CI gets a clean CocoaPods integration.
           cp pipeline/Gemfile ios-src/Gemfile
           [ -f pipeline/Gemfile.lock ] && cp pipeline/Gemfile.lock ios-src/Gemfile.lock || true
+          cp pipeline/Podfile ios-src/Podfile
+          # Drop stale Pods from the fork (often incomplete / binary leftovers).
+          rm -rf ios-src/Pods ios-src/Podfile.lock
           # Record provenance for the artifact
           mkdir -p ios-src/artifacts
           {
@@ -135,29 +138,49 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ios-src/Pods
             ~/Library/Caches/CocoaPods
-          key: pods-${{ runner.os }}-${{ hashFiles('ios-src/Podfile.lock', 'ios-src/Podfile') }}
+          key: pods-cache-${{ runner.os }}-${{ hashFiles('ios-src/Podfile') }}
           restore-keys: |
-            pods-${{ runner.os }}-
+            pods-cache-${{ runner.os }}-
 
       - name: Install CocoaPods dependencies
+        id: pods
         working-directory: ios-src
         run: |
-          if [ -f Podfile ]; then
-            bundle exec pod install --verbose
-          else
-            echo "No Podfile — building Xcode project directly"
-          fi
+          set -euo pipefail
+          # This app has no active pods; stale Pods linkage breaks the linker on CI.
+          # Deintegrate CocoaPods and build the .xcodeproj directly.
+          bundle exec pod deintegrate || true
+          rm -rf Pods
+          # Drop Pods framework entries / xcconfig base configs that survive deintegrate.
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("Pocket Contacts Pro.xcodeproj/project.pbxproj")
+          text = p.read_text()
+          lines = []
+          skip_substrings = [
+              "Pods_Pocket_Contacts_Pro.framework",
+              "Pods-Pocket Contacts Pro.debug.xcconfig",
+              "Pods-Pocket Contacts Pro.release.xcconfig",
+              "[CP] Check Pods Manifest.lock",
+          ]
+          for line in text.splitlines(True):
+              if any(s in line for s in skip_substrings):
+                  continue
+              # Clear baseConfigurationReference lines that pointed at Pods xcconfigs
+              if "baseConfigurationReference" in line and "Pods" in line:
+                  continue
+              lines.append(line)
+          p.write_text("".join(lines))
+          print("Stripped CocoaPods linkage from project.pbxproj")
+          PY
+          echo "use_workspace=false" >> "$GITHUB_OUTPUT"
+          xcodebuild -list -project "Pocket Contacts Pro.xcodeproj"
 
       - name: List schemes
         working-directory: ios-src
         run: |
-          if [ -f "${WORKSPACE}" ]; then
-            xcodebuild -list -workspace "${WORKSPACE}"
-          else
-            xcodebuild -list -project "Pocket Contacts Pro.xcodeproj"
-          fi
+          xcodebuild -list -project "Pocket Contacts Pro.xcodeproj"
 
       - name: Resolve Simulator destination
         id: sim
@@ -165,11 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           xcrun simctl list devices available || true
-          if [ -f "${WORKSPACE}" ]; then
-            SHOW_ARGS=(-workspace "${WORKSPACE}")
-          else
-            SHOW_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
-          fi
+          SHOW_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
           # Prefer an id-based destination from xcodebuild (avoids name/OS:latest mismatches).
           DEST_LINE=$(xcodebuild "${SHOW_ARGS[@]}" -scheme "${SCHEME}" -showdestinations 2>/dev/null \
             | grep 'platform:iOS Simulator' \
@@ -194,13 +213,8 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/logs build
           set -o pipefail
-          if [ -f "${WORKSPACE}" ]; then
-            PROJECT_ARGS=(-workspace "${WORKSPACE}")
-          else
-            PROJECT_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
-          fi
           xcodebuild \
-            "${PROJECT_ARGS[@]}" \
+            -project "Pocket Contacts Pro.xcodeproj" \
             -scheme "${SCHEME}" \
             -configuration Debug \
             -destination "${{ steps.sim.outputs.destination }}" \
@@ -233,13 +247,8 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/logs
           set -o pipefail
-          if [ -f "${WORKSPACE}" ]; then
-            PROJECT_ARGS=(-workspace "${WORKSPACE}")
-          else
-            PROJECT_ARGS=(-project "Pocket Contacts Pro.xcodeproj")
-          fi
           xcodebuild \
-            "${PROJECT_ARGS[@]}" \
+            -project "Pocket Contacts Pro.xcodeproj" \
             -scheme "${SCHEME}" \
             -configuration Debug \
             -destination "${{ steps.sim.outputs.destination }}" \
