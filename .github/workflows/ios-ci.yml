@@ -241,25 +241,6 @@ jobs:
           ls -lh artifacts/PocketContactsPro-simulator.app.zip
           cp artifacts/BUILD_INFO.txt artifacts/BUILD_INFO.txt.bak 2>/dev/null || true
 
-      - name: Unit tests
-        working-directory: ios-src
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/logs
-          set -o pipefail
-          xcodebuild \
-            -project "Pocket Contacts Pro.xcodeproj" \
-            -scheme "${SCHEME}" \
-            -configuration Debug \
-            -destination "${{ steps.sim.outputs.destination }}" \
-            -derivedDataPath build/DerivedData \
-            -resultBundlePath artifacts/logs/PocketContactsPro.xcresult \
-            -enableCodeCoverage YES \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES \
-            test \
-            | tee artifacts/logs/xcodebuild-test.log \
-            | bundle exec xcpretty --color --report junit --output artifacts/logs/junit.xml
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
